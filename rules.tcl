@@ -54,7 +54,7 @@ proc rule loc {
 	    fastcgi_param PATH_TRANSLATED $yatt_root$yatt_uri$yatt_args;
 	    fastcgi_param HTTPS           $HTTPS;
 
-	    # Not directory used. Only for debugging aid.
+	    # Not directly used. Only for debugging aid.
 	    fastcgi_param YATT_SCRIPT     $fastcgi_script_name;
 	    fastcgi_param YATT_PI         $fastcgi_path_info;
 	    fastcgi_param YATT_DIR        $yatt_root;
