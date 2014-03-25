@@ -12,6 +12,7 @@ snit::type genconf {
     option -destdir .
     option -stdout no
     option -safe yes
+    option -help no
     option -env ""
     option -quiet no
     option -dry-run no
@@ -307,12 +308,13 @@ namespace eval genconf {
 
 if {![info level] && [info script] eq $::argv0} {
     set opts [util::posix-getopt ::argv {} \
-		  [dict create -v -verbose -n -dry-run -q -quiet]]
+		  [dict create -v -verbose -n -dry-run -q -quiet\
+		      -h -help]]
     genconf gc {*}$opts
 
     set params [util::parse-params ::argv {}]
 
-    if {![llength $::argv]} {
+    if {[gc cget -help]} {
 	gc help
 	exit
     }
