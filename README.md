@@ -31,11 +31,11 @@ define HTML [ABS]/html
 
 target [MYAPP].conf {
     cmdsubst {
-	location [LOC]/ {
-	    fastcgi_split_path_info ^([LOC])(.*);
-	    include fastcgi_params;
-	    fastcgi_pass unix:[ABS]/var/tmp/fcgi.sock;
-	}
+        location [LOC]/ {
+            fastcgi_split_path_info ^([LOC])(.*);
+            include fastcgi_params;
+            fastcgi_pass unix:[ABS]/var/tmp/fcgi.sock;
+        }
     }
 }
 ```
