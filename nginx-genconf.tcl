@@ -7,17 +7,28 @@ namespace eval genconf {
     ::variable scriptName [info script]
 }
 
+snit::macro usage {usage kind name args} {
+    uplevel 1 [list set [set kind]_usage($name) $usage]
+    $kind $name {*}$args
+}
+
 snit::type genconf {
-    option -file rules.tcl
-    option -destdir .
-    option -stdout no
-    option -safe yes
+    usage {Rule definition file} \
+	option -file rules.tcl
+    usage {output directory} \
+	option -outdir _gen
+    usage {generate to stdout instead of outdir}\
+	option -stdout no
+    usage {avoid use of [interp -safe]} \
+	option -unsafe no
     option -help no
     option -env ""
     option -quiet no
     option -dry-run no
 
     option -generator "nginx-genconf"
+
+    typevariable optUsage -array [array get option_usage]
 
     component myRunner
 
@@ -26,7 +37,7 @@ snit::type genconf {
 
     constructor args {
 
-	set safe [from args -safe yes]
+	set safe [expr {![from args -unsafe no]}]
 	$self _build runner $safe
 
 	$self configurelist $args
@@ -34,24 +45,30 @@ snit::type genconf {
 
     method help {} {
 	set name [file tail $genconf::scriptName]
-	puts "Usage: $name \[opts\].. TARGET  \[K=V\].."
-	puts "  or   $name \[opts\].. :METHOD ARGS"
+	puts "Usage: $name \[-n\] \[-f rules.tcl\] \[-o destdir\]"
+	puts ""
+	puts "In general:"
+	puts "       $name \[--opt=value\].. TARGET.. \[ENV=VAL\].."
+	puts "  or   $name \[--opt=value\].. :METHOD ARGS..."
+	puts ""
 	puts "Methods: "
-	puts "  gen TARGET       generates TARGET"
-	puts "  target list      list targets (defined in rules.tcl)"
+	puts "  :generate TARGET...  generates TARGET"
+	puts "  :target   list       list targets (defined in rules.tcl)"
+	puts ""
 	puts "Options: "
 	foreach o [lsort [$self info options]] {
-	    puts "  $o"
+	    puts [format "  -%-15s           %s" \
+		      $o [default optUsage($o) {}]]
 	}
     }
 
-    method gen {{params ""} {target ""} args} {
+    method generate {{params ""} {target ""} args} {
 	$self load-with $params
 
 	if {$target eq ""} {
 	    set targlist [$self target list]
 	} else {
-	    set targlist [list $target]
+	    set targlist [linsert $args 0 $target]
 	}
 
 	set result {}
@@ -124,15 +141,19 @@ snit::type genconf {
 
     method {target write} {name data} {
 	set info [$self target info $name]
-	if {!$options(-stdout) && ![file exists $options(-destdir)]} {
-	    $self _run file mkdir $options(-destdir)
+	if {!$options(-stdout) && ![file exists $options(-outdir)]} {
+	    $self _run file mkdir $options(-outdir)
 	}
-	set fname [file join $options(-destdir) $name]
+	set fname [file join $options(-outdir) $name]
 	if {$options(-stdout)} {
 	    puts "## writing $fname as:\n$data"
 	} else {
-	    $self _msg writing $fname
-	    if {$options(-dry-run)} return
+	    if {$options(-dry-run)} {
+		$self _msg will write $fname
+		return
+	    } else {
+		$self _msg writing $fname
+	    }
 	    set fh [open $fname w]
 	    if {[dict get $info opts] ne ""} {
 		fconfigure $fh {*}[dict get $info opts]
@@ -269,8 +290,14 @@ namespace eval ::util {
 		    set value [expr {1}]
 		}
 	    } elseif {[dict exists $shortcut $opt]} {
-		set name [dict get $shortcut $opt]
-		set value [expr {1}]
+		lassign [dict get $shortcut $opt] nArgs name
+		if {$nArgs == 0} {
+		    set value [expr {1}]
+		} elseif {$nArgs == 1} {
+		    set args [lassign $args value]
+		} else {
+		    error "Unsupported nArgs($nArgs) for $name"
+		}
 	    } else {
 		error "Can't parse option! $opt"
 	    }
@@ -282,23 +309,22 @@ namespace eval ::util {
 
 	list {*}$dict {*}$result
     }
-    proc parse-params {argVar {dict ""}} {
-	upvar 1 $argVar args
-	set result {}
-	while {[llength $args]} {
-	    if {![regexp = [lindex $args 0]]} break
-	    set args [lassign $args opt]
-	    if {[regexp {^(\w[\w\-]*)=(.*)$} $opt \
-		     -> name value]} {
-		error "Can't parse option! $opt"
-	    }
-	    lappend result $name $value
-	    if {[dict exists $dict $name]} {
-		dict unset dict $name
+    proc parse-params {arglist {dict ""}} {
+	set params {}
+	set others {}
+	while {[llength $arglist]} {
+	    set arglist [lassign $arglist any]
+	    if {[regexp = $any]} {
+		if {[regexp {^(\w[\w\-]*)=(.*)$} $any \
+			 -> name value]} {
+		    error "Can't parse option! $opt"
+		}
+		lappend params $name $value
+	    } else {
+		lappend others $any
 	    }
 	}
-
-	dict merge $dict $result
+	list [dict merge $dict $params] {*}$others
     }
 }
 
@@ -308,21 +334,33 @@ namespace eval genconf {
 
 if {![info level] && [info script] eq $::argv0} {
     set opts [util::posix-getopt ::argv {} \
-		  [dict create -v -verbose -n -dry-run -q -quiet\
-		      -h -help]]
-    genconf gc {*}$opts
+		  [dict create \
+		       -h {0 -help} \
+		       -v {0 -verbose} \
+		       -n {0 -dry-run} \
+		       -q {0 -quiet} \
+		       -o {1 -outdir} \
+		       -f {1 -file} \
+		      ]]
 
-    set params [util::parse-params ::argv {}]
+    genconf gen {*}$opts
 
-    if {[gc cget -help]} {
-	gc help
+    if {[gen cget -help]} {
+	gen help
 	exit
     }
 
-    if {[regsub ^: [lindex $::argv 0] {} meth]} {
-	gc load-with $params
-	puts [gc $meth {*}[lrange $::argv 1 end]]
+    set ::argv [lassign [util::parse-params $::argv {}] params]
+
+    if {![regsub ^: [lindex $::argv 0] {} meth]} {
+	gen generate $params {*}$::argv
     } else {
-	gc gen $params {*}$::argv
+	set rest [lrange $::argv 1 end]
+	if {$meth eq "generate"} {
+	    gen generate $params {*}$rest
+	} else {
+	    gen load-with $params
+	    puts [gen $meth {*}$rest]
+	}
     }
 }

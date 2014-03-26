@@ -1,6 +1,29 @@
 # -*- coding: utf-8 -*-
 
-set ROOT [default ::env(DOCUMENT_ROOT) /var/www/webapps]
+#========================================
+#
+# [target NAME COMMAND] declares target file NAME and its generator COMMAND.
+#
+# [define NAME VALUE] defines Tcl proc "NAME" and also variable $::NAME.
+#
+# [cmdsubst STR] applies [subst] on STR with [command] substitution only.
+#  You can use $ and \ without escaping.
+#
+# [mapsubst VARNAME LIST STR] loops on LIST
+#
+# [comment STR] is for embedded comment.
+#
+# [varsubst STR] applies [subst] on STR with $variable substitution only.
+#  You can use [] and \ without escaping.
+#
+# [default VAR VALUE] tries to fetch VAR. If it is empty, returns VALUE
+#
+# [cget -name] returns config param of nginx-genconf itself.
+#
+#========================================
+
+
+define ROOT [default ::env(DOCUMENT_ROOT) /var/www/webapps]
 
 # location without last '/'
 define LOC  /myapp
@@ -13,6 +36,7 @@ define HTML [APP]/html
 
 # Expected path of where configs are saved.
 define ETC  [APP].etc
+
 
 # nginx configs
 target main.conf    {rule /}
