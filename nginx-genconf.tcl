@@ -13,20 +13,22 @@ snit::macro usage {usage kind name args} {
 }
 
 snit::type genconf {
-    usage {Rule definition file} \
+    usage {Rule definition file(default: rules.tcl)} \
 	option -file rules.tcl
-    usage {output directory} \
+    usage {output directory(shortly: -o, default: _gen)} \
 	option -outdir _gen
     usage {generate to stdout instead of outdir}\
 	option -stdout no
-    usage {avoid use of [interp -safe]} \
+    usage {avoid use of tcl sandbox ([interp -safe])} \
 	option -unsafe no
     option -help no
-    option -env ""
     option -quiet no
-    option -dry-run no
+    option -debug no
+    usage {Just report what this will generate, like make -n} \
+	option -dry-run no
 
-    option -generator "nginx-genconf"
+    usage {Name of generator. Can be embedded via [cget -generator].}\
+	option -generator "nginx-genconf"
 
     typevariable optUsage -array [array get option_usage]
 
@@ -49,15 +51,16 @@ snit::type genconf {
 	puts ""
 	puts "In general:"
 	puts "       $name \[--opt=value\].. TARGET.. \[ENV=VAL\].."
-	puts "  or   $name \[--opt=value\].. :METHOD ARGS..."
+	puts "  or   $name \[--opt=value\].. :METHOD ARGS... \[ENV=VAL\].."
 	puts ""
 	puts "Methods: "
 	puts "  :generate TARGET...  generates TARGET"
-	puts "  :target   list       list targets (defined in rules.tcl)"
+	puts "  :target list         list targets (defined in rules.tcl)"
+	puts "  :target eval TARGET  generate TARGET to stdout"
 	puts ""
 	puts "Options: "
 	foreach o [lsort [$self info options]] {
-	    puts [format "  -%-15s           %s" \
+	    puts [format "  -%-15s  %s" \
 		      $o [default optUsage($o) {}]]
 	}
     }
@@ -67,6 +70,9 @@ snit::type genconf {
 
 	if {$target eq ""} {
 	    set targlist [$self target list]
+	    if {![llength $targlist]} {
+		error "No target is defined in $options(-file), stopped."
+	    }
 	} else {
 	    set targlist [linsert $args 0 $target]
 	}
@@ -87,8 +93,6 @@ snit::type genconf {
 	}
 	install myRunner using interp create {*}$opts $self.runner
 
-	$myRunner eval [list array set env $options(-env)]
-
 	foreach cmd [info commands ::util::*] {
 	    $myRunner eval [::util::definition-of-proc $cmd yes]
 	}
@@ -98,13 +102,18 @@ snit::type genconf {
 
 	$myRunner alias target $self target add
 	$myRunner alias cget   $self cget
+	$myRunner alias include $self include
     }
 
     method load-with {params} {
 	$myRunner eval [list array unset env]
-	$myRunner eval [list array set env [dict merge $options(-env) $params]]
+	$myRunner eval [list array set env $params]
 
-	$myRunner invokehidden source $options(-file)
+	$self include $options(-file)
+    }
+    
+    method include file {
+	$myRunner invokehidden source $file
     }
 
     method {target list} {} {
@@ -122,7 +131,7 @@ snit::type genconf {
     }
 
     method {target eval} name {
-	$myRunner eval [$self target command $name]
+	$myRunner eval [list apply [list {} [$self target command $name]]]
     }
 
     method {target info} name {
@@ -180,6 +189,14 @@ namespace eval ::util {
     # To define constant (in rules.tcl)
 
     proc define {name value} {
+	if {[llength [info command $name]]} {
+	    if {[set prev [lindex [info body $name] 1]] eq $value} return
+	    set dict [info frame -1]
+	    append place [dict get $dict file]
+	    append place " line [dict get $dict line]"
+	    error "Conflicting definition of $name in $place
+  prev=$prev, new=$value"
+	}
 	set ::$name $value
 	proc $name {} [list return $value]
     }
@@ -315,9 +332,9 @@ namespace eval ::util {
 	while {[llength $arglist]} {
 	    set arglist [lassign $arglist any]
 	    if {[regexp = $any]} {
-		if {[regexp {^(\w[\w\-]*)=(.*)$} $any \
-			 -> name value]} {
-		    error "Can't parse option! $opt"
+		if {![regexp {^(\w[\w\-]*)=(.*)$} $any \
+			  -> name value]} {
+		    error "Can't parse option! $any"
 		}
 		lappend params $name $value
 	    } else {
@@ -352,15 +369,27 @@ if {![info level] && [info script] eq $::argv0} {
 
     set ::argv [lassign [util::parse-params $::argv {}] params]
 
-    if {![regsub ^: [lindex $::argv 0] {} meth]} {
-	gen generate $params {*}$::argv
-    } else {
-	set rest [lrange $::argv 1 end]
-	if {$meth eq "generate"} {
-	    gen generate $params {*}$rest
+    set debug [gen cget -debug]
+    set rc [catch {
+	if {![regsub ^: [lindex $::argv 0] {} meth]} {
+	    gen generate $params {*}$::argv
 	} else {
-	    gen load-with $params
-	    puts [gen $meth {*}$rest]
+	    set rest [lrange $::argv 1 end]
+	    if {$meth eq "generate"} {
+		gen generate $params {*}$rest
+	    } else {
+		gen load-with $params
+		puts [gen $meth {*}$rest]
+	    }
 	}
+    } error]
+
+    if {$rc} {
+	if {$debug} {
+	    puts $::errorInfo
+	} else {
+	    puts stderr $error
+	}
+	exit 1
     }
 }
