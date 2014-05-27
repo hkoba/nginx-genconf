@@ -149,6 +149,10 @@ snit::type genconf {
     }
 
     method {target write} {name data} {
+
+	regsub -all -line {^[\ \t]+\n} $data "\n" data
+	regsub {\n*\Z} $data "\n" data
+
 	set info [$self target info $name]
 	if {!$options(-stdout) && ![file exists $options(-outdir)]} {
 	    $self _run file mkdir $options(-outdir)
@@ -204,18 +208,19 @@ namespace eval ::util {
     #========================================
     # subst with loop
     #
-    proc mapsubst {varName list subst} {
+    proc mapsubst {varName list subst {separator ""}} {
 	upvar 1 $varName var
 	set result ""
 	foreach var $list {
-	    append result [uplevel 1 [list subst -novariable -nobackslash\
+	    lappend result [uplevel 1 [list subst -novariable -nobackslash\
 					  $subst]]
 	}
-	set result
+	join $result $separator
     }
 
     proc cmdsubst {subst} {
-	set result [uplevel 1 [list subst -novariables -nobackslash $subst]]
+	set result [uplevel 1 [list subst -novariables -nobackslash \
+				   [trimright $subst]]]
 	softab [unindent $result]
     }
 
@@ -234,6 +239,17 @@ namespace eval ::util {
     proc comment args { return "" }
 
     proc quote str { set str }
+
+    proc trim str {
+	# trimleft + trimright(space, tab but not newline)
+	regsub -all {^\s*|[\ \t]*$} $str {}
+    }
+    proc trimright str {
+	# trimright(space, tab but not newline)
+	regsub -all {[\ \t]*$} $str {}
+    }
+
+    proc trimleft str { string trimleft $str }
 
     proc unindent string {
 	# Replace each indented-newlines with simple newlines
